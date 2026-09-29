@@ -4,7 +4,7 @@
   "description": "Le guide communautaire de SnkMC : progression, aventure, camps et systèmes du serveur.",
   "defaultLocale": "fr",
   "locales": ["fr", "en"],
-  "theme": { "accent": "#c94c3d" },
+  "theme": { "accent": "invalid-test-color" },
   "logo": "logo.svg",
   "categories": [
     { "id": "informations-generales", "label": "Informations générales", "labelEn": "General information" },
