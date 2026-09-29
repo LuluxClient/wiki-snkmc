@@ -1,0 +1,47 @@
+name: Request wiki build
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+  pull_request_target:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+
+jobs:
+  request:
+    if: ${{ github.event.repository.fork == false && vars.WIKI_ID != '' && vars.REQUEST_ENABLED == 'true' && (github.event_name != 'workflow_dispatch' || github.ref == 'refs/heads/main') }}
+    runs-on: ubuntu-24.04
+    steps:
+      - id: app
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
+        with:
+          client-id: ${{ vars.REQUEST_APP_CLIENT_ID }}
+          private-key: ${{ secrets.REQUEST_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: wiki-engine
+          permission-actions: write
+      - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3
+        with:
+          github-token: ${{ steps.app.outputs.token }}
+          script: |
+            // This workflow runs only from the trusted default branch.
+            // Never checkout, evaluate or execute files from a contributor's fork.
+            const pr = context.payload.pull_request;
+            if (pr && (pr.base.ref !== 'main' || pr.state !== 'open' || pr.draft)) return;
+            const sha = pr ? pr.head.sha : context.sha;
+            if (!/^[a-f0-9]{40}$/.test(sha)) throw new Error('Invalid content SHA.');
+            await github.rest.actions.createWorkflowDispatch({
+              owner: context.repo.owner,
+              repo: 'wiki-engine',
+              workflow_id: 'site-build.yml',
+              ref: 'engine-stable',
+              inputs: {
+                wiki_id: '${{ vars.WIKI_ID }}',
+                mode: pr ? 'docs-pr' : 'docs-main',
+                content_sha: sha,
+                pr_number: pr ? String(pr.number) : ''
+              }
+            });

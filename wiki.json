@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "title": "SnkMC · Wiki",
+  "description": "Le guide communautaire de SnkMC : progression, aventure, camps et systèmes du serveur.",
+  "defaultLocale": "fr",
+  "locales": ["fr", "en"],
+  "theme": { "accent": "#c94c3d" },
+  "logo": "logo.svg",
+  "categories": [
+    { "id": "informations-generales", "label": "Informations générales", "labelEn": "General information" },
+    { "id": "debuter", "label": "Bien débuter", "labelEn": "Getting started" },
+    { "id": "gameplay", "label": "Gameplay", "labelEn": "Gameplay" },
+    { "id": "aventure", "label": "Aventure", "labelEn": "Adventure" },
+    { "id": "camp", "label": "Camp", "labelEn": "Camp" },
+    { "id": "reference", "label": "Référence", "labelEn": "Reference" },
+    { "id": "contribuer", "label": "Contribuer", "labelEn": "Contribute" }
+  ],
+  "hierarchy": "hierarchy.json"
+}

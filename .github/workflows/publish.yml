@@ -1,0 +1,142 @@
+name: Publish built wiki
+
+on:
+  workflow_dispatch:
+    inputs:
+      engine_run_id:
+        required: true
+        type: string
+      engine_sha:
+        required: true
+        type: string
+      content_sha:
+        required: true
+        type: string
+      artifact_digest:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: wiki-production
+  cancel-in-progress: false
+
+jobs:
+  receive:
+    if: ${{ github.event.repository.fork == false && github.ref == 'refs/heads/main' && vars.WIKI_ID != '' }}
+    runs-on: ubuntu-24.04
+    outputs:
+      smoke_article: ${{ steps.verify.outputs.smoke_article }}
+    steps:
+      - id: engine
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
+        with:
+          client-id: ${{ vars.REQUEST_APP_CLIENT_ID }}
+          private-key: ${{ secrets.REQUEST_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: wiki-engine
+          permission-actions: read
+      - id: provenance
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3
+        with:
+          github-token: ${{ steps.engine.outputs.token }}
+          script: |
+            const owner = context.repo.owner, repo = 'wiki-engine';
+            const runId = Number('${{ inputs.engine_run_id }}');
+            const digest = '${{ inputs.artifact_digest }}';
+            if (!Number.isSafeInteger(runId) || runId <= 0) throw new Error('Invalid run ID.');
+            if (!/^sha256:[a-f0-9]{64}$/.test(digest)) throw new Error('Invalid artifact digest.');
+            const response = await github.rest.actions.getWorkflowRun({ owner, repo, run_id: runId });
+            const run = response.data;
+            if (run.path !== '.github/workflows/site-build.yml' || !['push', 'workflow_dispatch'].includes(run.event) || run.head_sha !== '${{ inputs.engine_sha }}') throw new Error('Unexpected engine workflow or commit.');
+            for (let attempt = 0; attempt < 12; attempt++) {
+              const jobs = await github.paginate(github.rest.actions.listJobsForWorkflowRun, { owner, repo, run_id: runId, per_page: 100 });
+              const build = jobs.find(job => job.name === 'build-${{ vars.WIKI_ID }}');
+              if (build?.status === 'completed') {
+                if (build.conclusion !== 'success') throw new Error('This wiki build failed.');
+                break;
+              }
+              if (attempt === 11) throw new Error('Wiki build has not completed.');
+              await new Promise(resolve => setTimeout(resolve, 5000));
+            }
+            const artifacts = await github.paginate(github.rest.actions.listWorkflowRunArtifacts, { owner, repo, run_id: runId, per_page: 100 });
+            const target = artifacts.find(item => item.name === 'site-${{ vars.WIKI_ID }}' && !item.expired);
+            if (!target || target.digest !== digest) throw new Error('Artifact identity or digest mismatch.');
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          repository: ${{ github.repository_owner }}/wiki-engine
+          run-id: ${{ inputs.engine_run_id }}
+          name: site-${{ vars.WIKI_ID }}
+          path: site
+          github-token: ${{ steps.engine.outputs.token }}
+      - id: verify
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3
+        env:
+          EXPECTED_ENGINE_SHA: ${{ vars.ENGINE_SHA }}
+        with:
+          script: |
+            const fs = require('node:fs'), path = require('node:path');
+            const expectedEngine = '${{ inputs.engine_sha }}';
+            const expectedContent = '${{ inputs.content_sha }}';
+            if (![expectedEngine, expectedContent].every(value => /^[a-f0-9]{40}$/.test(value))) throw new Error('Invalid source SHAs.');
+            const stamp = JSON.parse(fs.readFileSync('site/deployment.json', 'utf8'));
+            if (stamp.engineSha !== expectedEngine || stamp.contentSha !== expectedContent) throw new Error('Build source mismatch.');
+            if (!/^[A-Za-z0-9][A-Za-z0-9/._%-]*\/$/.test(stamp.smokeArticle) || stamp.smokeArticle.includes('..')) throw new Error('Invalid smoke article.');
+            const article = path.resolve('site', decodeURIComponent(stamp.smokeArticle), 'index.html');
+            if (!article.startsWith(path.resolve('site') + path.sep) || !fs.existsSync(article)) throw new Error('Smoke article missing.');
+            const branch = await github.rest.repos.getBranch({ ...context.repo, branch: 'main' });
+            if (branch.data.commit.sha !== expectedContent) throw new Error('Documentation main advanced.');
+            if (process.env.EXPECTED_ENGINE_SHA !== expectedEngine) throw new Error('Newer engine build expected.');
+            core.setOutput('smoke_article', stamp.smokeArticle);
+      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9
+        with:
+          path: site
+          retention-days: 1
+
+  deploy:
+    needs: receive
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3
+        env:
+          EXPECTED_ENGINE_SHA: ${{ vars.ENGINE_SHA }}
+        with:
+          script: |
+            const branch = await github.rest.repos.getBranch({ ...context.repo, branch: 'main' });
+            if (branch.data.commit.sha !== '${{ inputs.content_sha }}' || process.env.EXPECTED_ENGINE_SHA !== '${{ inputs.engine_sha }}')
+              throw new Error('A newer build is required.');
+      - id: deployment
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346
+      - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3
+        env:
+          PUBLISHED_URL: ${{ steps.deployment.outputs.page_url }}
+          SMOKE_ARTICLE: ${{ needs.receive.outputs.smoke_article }}
+        with:
+          script: |
+            const base = new URL(process.env.PUBLISHED_URL);
+            if (base.protocol !== 'https:') throw new Error('Invalid published URL.');
+            if (!base.pathname.endsWith('/')) base.pathname += '/';
+            for (let attempt = 0; attempt < 6; attempt++) {
+              try {
+                const marker = await fetch(new URL('deployment.json', base), { cache: 'no-store' });
+                const stamp = await marker.json();
+                if (!marker.ok || stamp.engineSha !== '${{ inputs.engine_sha }}' || stamp.contentSha !== '${{ inputs.content_sha }}') throw new Error('Published revision mismatch.');
+                for (const file of ['', process.env.SMOKE_ARTICLE, 'admin/', 'editor/']) {
+                  const page = await fetch(new URL(file, base), { cache: 'no-store' });
+                  if (!page.ok || !(await page.text()).includes('<h1')) throw new Error('Page unavailable: ' + file);
+                }
+                return;
+              } catch (error) {
+                if (attempt === 5) throw error;
+                await new Promise(resolve => setTimeout(resolve, 10000));
+              }
+            }
