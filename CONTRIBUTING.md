@@ -12,6 +12,7 @@
 1. Faites un fork de ce dépôt sur GitHub, puis clonez votre fork avec GitHub Desktop.
 2. Ouvrez <https://luluxclient.github.io/wiki-snkmc/editor/> dans un navigateur compatible avec l’accès aux dossiers locaux. Cliquez sur « Choisir mon dossier wiki » et sélectionnez le dossier cloné, celui qui contient `wiki.json`.
 3. Choisissez une page, modifiez le titre ou le texte, regardez l’aperçu et ajoutez vos images avec une description. Cliquez sur « Enregistrer dans mon dossier ».
+   Cette étape modifie seulement votre copie locale : le wiki public ne change pas encore.
 4. Dans GitHub Desktop, vérifiez les changements, faites **Commit**, puis **Push origin** et **Create Pull Request** vers le dépôt SnkMC. Le staff relit avant la publication.
 
 L’éditeur local ne se connecte pas à GitHub et ne pousse rien tout seul : GitHub Desktop s’en charge. Si votre navigateur ne propose pas le choix d’un dossier, utilisez la correction rapide sur GitHub. Aucune commande, installation de VS Code ou connexion Cloudflare n’est nécessaire.
